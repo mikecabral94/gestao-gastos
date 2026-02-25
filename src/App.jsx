@@ -16,6 +16,30 @@ ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarEle
 // API Base URL
 const API_URL = 'http://localhost:3002/api';
 
+// LocalStorage keys
+const STORAGE_KEYS = {
+  expenses: 'gestao-gastos-expenses',
+  budgets: 'gestao-gastos-budgets',
+};
+
+// LocalStorage helpers
+const storage = {
+  getExpenses: () => JSON.parse(localStorage.getItem(STORAGE_KEYS.expenses) || '[]'),
+  setExpenses: (expenses) => localStorage.setItem(STORAGE_KEYS.expenses, JSON.stringify(expenses)),
+  getBudgets: () => JSON.parse(localStorage.getItem(STORAGE_KEYS.budgets) || '{}'),
+  setBudgets: (budgets) => localStorage.setItem(STORAGE_KEYS.budgets, JSON.stringify(budgets)),
+};
+
+// Check if API is available
+const checkApiAvailable = async () => {
+  try {
+    const response = await fetch(`${API_URL}/health`, { method: 'GET', signal: AbortSignal.timeout(2000) });
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+
 // Categories with colors
 const CATEGORIES = [
   { id: 'alimentacao', name: 'Alimentacao', color: '#f97316', bgColor: 'bg-orange-500', icon: '🍔' },
@@ -65,6 +89,7 @@ function App() {
   const [expenses, setExpenses] = useState([]);
   const [budget, setBudget] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [useApi, setUseApi] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -85,38 +110,58 @@ function App() {
     setToast({ message, type });
   };
 
-  // Fetch expenses from API
-  const fetchExpenses = useCallback(async () => {
+  // Fetch expenses (API or localStorage)
+  const fetchExpenses = useCallback(async (apiAvailable = useApi) => {
     try {
-      const params = new URLSearchParams();
-      if (selectedMonth) params.append('month', selectedMonth);
-      if (filterCategory) params.append('category', filterCategory);
+      if (apiAvailable) {
+        const params = new URLSearchParams();
+        if (selectedMonth) params.append('month', selectedMonth);
+        if (filterCategory) params.append('category', filterCategory);
 
-      const response = await fetch(`${API_URL}/expenses?${params}`);
-      const data = await response.json();
-      setExpenses(data);
+        const response = await fetch(`${API_URL}/expenses?${params}`);
+        const data = await response.json();
+        setExpenses(data);
+      } else {
+        // Use localStorage
+        let data = storage.getExpenses();
+        if (selectedMonth) {
+          data = data.filter((e) => e.date.startsWith(selectedMonth));
+        }
+        if (filterCategory) {
+          data = data.filter((e) => e.category === filterCategory);
+        }
+        data.sort((a, b) => new Date(b.date) - new Date(a.date));
+        setExpenses(data);
+      }
     } catch (error) {
       console.error('Erro ao carregar despesas:', error);
-      showToast('Erro ao carregar despesas', 'error');
     }
-  }, [selectedMonth, filterCategory]);
+  }, [selectedMonth, filterCategory, useApi]);
 
-  // Fetch budget from API
-  const fetchBudget = useCallback(async () => {
+  // Fetch budget (API or localStorage)
+  const fetchBudget = useCallback(async (apiAvailable = useApi) => {
     try {
-      const response = await fetch(`${API_URL}/budgets/${selectedMonth}`);
-      const data = await response.json();
-      setBudget(data.amount || 0);
+      if (apiAvailable) {
+        const response = await fetch(`${API_URL}/budgets/${selectedMonth}`);
+        const data = await response.json();
+        setBudget(data.amount || 0);
+      } else {
+        // Use localStorage
+        const budgets = storage.getBudgets();
+        setBudget(budgets[selectedMonth] || 0);
+      }
     } catch (error) {
       console.error('Erro ao carregar orcamento:', error);
     }
-  }, [selectedMonth]);
+  }, [selectedMonth, useApi]);
 
-  // Load data on mount and when filters change
+  // Check API availability and load data
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-      await Promise.all([fetchExpenses(), fetchBudget()]);
+      const apiAvailable = await checkApiAvailable();
+      setUseApi(apiAvailable);
+      await Promise.all([fetchExpenses(apiAvailable), fetchBudget(apiAvailable)]);
       setLoading(false);
     };
     loadData();
@@ -191,28 +236,43 @@ function App() {
     }
 
     try {
-      if (editingId) {
-        // Update expense
-        const response = await fetch(`${API_URL}/expenses/${editingId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...formData, amount }),
-        });
-
-        if (!response.ok) throw new Error('Erro ao atualizar');
-        showToast('Despesa atualizada com sucesso');
+      if (useApi) {
+        if (editingId) {
+          const response = await fetch(`${API_URL}/expenses/${editingId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...formData, amount }),
+          });
+          if (!response.ok) throw new Error('Erro ao atualizar');
+        } else {
+          const response = await fetch(`${API_URL}/expenses`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...formData, amount }),
+          });
+          if (!response.ok) throw new Error('Erro ao criar');
+        }
       } else {
-        // Create expense
-        const response = await fetch(`${API_URL}/expenses`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...formData, amount }),
-        });
-
-        if (!response.ok) throw new Error('Erro ao criar');
-        showToast('Despesa adicionada com sucesso');
+        // Use localStorage
+        const allExpenses = storage.getExpenses();
+        if (editingId) {
+          const index = allExpenses.findIndex((e) => e.id === editingId);
+          if (index !== -1) {
+            allExpenses[index] = { ...allExpenses[index], ...formData, amount };
+          }
+        } else {
+          const newExpense = {
+            id: Date.now(),
+            ...formData,
+            amount,
+            created_at: new Date().toISOString(),
+          };
+          allExpenses.push(newExpense);
+        }
+        storage.setExpenses(allExpenses);
       }
 
+      showToast(editingId ? 'Despesa atualizada com sucesso' : 'Despesa adicionada com sucesso');
       closeModal();
       fetchExpenses();
     } catch (error) {
@@ -225,13 +285,19 @@ function App() {
     try {
       const newBudget = parseFloat(budgetInput) || 0;
 
-      const response = await fetch(`${API_URL}/budgets`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ month: selectedMonth, amount: newBudget }),
-      });
-
-      if (!response.ok) throw new Error('Erro ao guardar orcamento');
+      if (useApi) {
+        const response = await fetch(`${API_URL}/budgets`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ month: selectedMonth, amount: newBudget }),
+        });
+        if (!response.ok) throw new Error('Erro ao guardar orcamento');
+      } else {
+        // Use localStorage
+        const budgets = storage.getBudgets();
+        budgets[selectedMonth] = newBudget;
+        storage.setBudgets(budgets);
+      }
 
       setBudget(newBudget);
       setShowBudgetModal(false);
@@ -282,11 +348,17 @@ function App() {
     if (!confirm('Tem certeza que deseja eliminar esta despesa?')) return;
 
     try {
-      const response = await fetch(`${API_URL}/expenses/${id}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) throw new Error('Erro ao eliminar');
+      if (useApi) {
+        const response = await fetch(`${API_URL}/expenses/${id}`, {
+          method: 'DELETE',
+        });
+        if (!response.ok) throw new Error('Erro ao eliminar');
+      } else {
+        // Use localStorage
+        const allExpenses = storage.getExpenses();
+        const filtered = allExpenses.filter((e) => e.id !== id);
+        storage.setExpenses(filtered);
+      }
 
       showToast('Despesa eliminada');
       fetchExpenses();
