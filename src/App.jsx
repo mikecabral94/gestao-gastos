@@ -33,7 +33,13 @@ const storage = {
 // Check if API is available
 const checkApiAvailable = async () => {
   try {
-    const response = await fetch(`${API_URL}/health`, { method: 'GET', signal: AbortSignal.timeout(2000) });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const response = await fetch(`${API_URL}/health`, {
+      method: 'GET',
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
     return response.ok;
   } catch {
     return false;
