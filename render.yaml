@@ -1,0 +1,20 @@
+databases:
+  - name: gestao-gastos-db
+    databaseName: gestao_gastos
+    user: gestao_gastos_user
+    plan: free
+
+services:
+  - type: web
+    name: gestao-gastos-api
+    runtime: node
+    plan: free
+    buildCommand: cd server && npm install
+    startCommand: cd server && npm start
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: gestao-gastos-db
+          property: connectionString
+      - key: NODE_ENV
+        value: production

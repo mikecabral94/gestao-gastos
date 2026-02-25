@@ -13,8 +13,10 @@ const ITEMS_PER_PAGE = 10;
 // Register Chart.js components
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement);
 
-// API Base URL
-const API_URL = 'http://localhost:3002/api';
+// API Base URL - use Render in production, localhost in development
+const API_URL = window.location.hostname === 'localhost'
+  ? 'http://localhost:3002/api'
+  : 'https://gestao-gastos-api.onrender.com/api';
 
 // LocalStorage keys
 const STORAGE_KEYS = {
