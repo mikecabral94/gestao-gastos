@@ -228,6 +228,11 @@ app.get('/api/stats/:month', async (req, res) => {
   }
 });
 
+// Root route
+app.get('/', (req, res) => {
+  res.json({ message: 'Gestao Gastos API', status: 'online' });
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
